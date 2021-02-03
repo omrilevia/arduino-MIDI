@@ -1,0 +1,2633 @@
+SnipSave
+Sign Up Log In
+Omri Levia
+Omri Levia
+MIDI master
+C_CPP
+Copy
+//This code actuates a MIDI controller, which sends musical messages over USB to a virtual MIDI port
+//to be read by a Digital Audio Workspace. This code has several functions:
+
+//tempotap:
+  //Tapping CAP1 takes difference in time between successive taps
+
+//arp: 
+  //takes value from tempo tap and loops up and down between played notes with that value delay in between
+
+//arpmessage:
+//  turns on and off the arp, prints to screen
+
+//playnotes:
+//  play any note from 0th to 87th note
+
+//Octavechange:
+//   switches between octaves (attached to CAP3/4)
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(2,3,4,5,6,7);
+
+#define NOTE_OFF  0x80
+#define NOTE_ON   0x90
+#define CC        0xB0
+#define NUMBER_OF_ANALOG_INPUTS 8
+#define NUMBER_OF_DIGITAL_INPUTS 16
+#define CHANNEL 1
+#define CAP1    18
+#define CAP2    19
+#define CAP3    20
+#define CAP4    22
+
+#define REDPIN 8
+#define GREENPIN 9
+#define BLUEPIN 10
+#define px A7
+#define py A6
+#define ps A8
+int fade = 3;
+int color = 3;
+boolean on = false;
+int buttonstate = 0;
+int lastbuttonstate = 0;
+int colorvalold[NUMBER_OF_ANALOG_INPUTS];
+int colorval[NUMBER_OF_ANALOG_INPUTS];
+
+int controllers[NUMBER_OF_ANALOG_INPUTS] = {
+0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17
+};
+int notes[4] = {
+0x43,0x45,0x47,0x42
+};
+int switches[NUMBER_OF_DIGITAL_INPUTS] = {
+  53,52,51,50,49,48,47,46,45,44,43,42,41,40,39,38
+};
+int ledPins[NUMBER_OF_DIGITAL_INPUTS] = {
+  25,24,23,22
+};
+
+int octave = 3;
+int octaves0[16] = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F};
+int octaves1[16] = {0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F};
+int octaves2[16] = {0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F};
+int octaves3[16] = {0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F};
+int octaves4[16] = {0x40,0x41,0x42,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4A,0x4B,0x4C,0x4D,0x4E,0x4F};
+int octaves5[16] = {0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5A,0x5B,0x5C,0x5D,0x5E,0x5F};
+int octaves6[16] = {0x60,0x61,0x62,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6A,0x6B,0x6C,0x46,0x6E,0x6F};
+int octaves7[8] =  {0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77};
+int notechar[16] = {"C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B","C","C#","D","Eb"};
+int analogVal[NUMBER_OF_ANALOG_INPUTS];
+int analogOld[NUMBER_OF_ANALOG_INPUTS];
+int digitalVal[NUMBER_OF_DIGITAL_INPUTS];
+int digitalOld[NUMBER_OF_DIGITAL_INPUTS];
+
+int state = 0;
+int tempoval = 0;
+int arpvalmessage = 0;
+int arpval = 0;
+float millitime;
+float minutetime;
+float playtime;
+float t1;
+float t2;
+int tempo = 0;
+
+typedef struct{
+  uint8_t status;
+  uint8_t data1;
+  uint8_t data2;
+  }
+  
+t_midiMsg;
+
+void setup() 
+{
+  for(int i = 0; i < NUMBER_OF_ANALOG_INPUTS; i++){
+    analogOld[i] = -1;
+  }
+  for (int i = 0; i< NUMBER_OF_ANALOG_INPUTS;i++){
+    colorvalold[i] = -1;
+  }
+ for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalOld[i] = -1;
+ }
+  for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+    pinMode(switches[i],INPUT_PULLUP);
+    //pinMode(7,INPUT_PULLUP);
+  }
+
+pinMode(REDPIN, OUTPUT);
+  pinMode(GREENPIN, OUTPUT);
+  pinMode(BLUEPIN, OUTPUT);
+   analogWrite(GREENPIN,255);
+analogWrite(REDPIN,255);
+analogWrite(BLUEPIN,255);
+  
+ lcd.begin(20,4);
+ attachInterrupt(digitalPinToInterrupt(18),tempotap,RISING);
+ pinMode(8,INPUT);
+ Serial.begin(9600);
+ delay(500);
+ digitalWrite(13,HIGH);
+ delay(500);
+ digitalWrite(13,LOW);
+
+}
+
+//FUNCTIONS: tempotap(),arp(),arpmessage(),playnotes0-7(), octavechange(),
+
+void tempotap()
+{
+//  lcd.setCursor(0,2);
+//  lcd.print("         ");
+ if (state == 1 && tempoval == 0){
+  analogWrite(GREENPIN,255);
+  analogWrite(REDPIN,255);
+  analogWrite(BLUEPIN,255);
+//  lcd.print("Tempo: ");
+ t1 = (float) millis();
+  tempoval = 1;
+ }
+ else if (state == 1 && tempoval == 1) {
+  analogWrite(GREENPIN,random(0,255));
+  analogWrite(REDPIN,random(0,255));
+  analogWrite(BLUEPIN,random(255));
+ // Serial.println("TAP2");
+ t2 = (float) millis();
+  tempoval = 0;
+//  lcd.setCursor(7,2);
+//   lcd.print(tempo);
+//   Serial.println(tempo);
+ }
+ if (t1 != t2){
+  millitime = (float)abs(t1-t2); //in milliseconds
+  minutetime = millitime/1000.00; //in milliseconds per tap (beat)
+  tempo = (int) 60/minutetime;
+  float playtime = millitime/2.0;
+   }
+// Serial.println(state);
+ delay(20);
+}
+
+
+void arp(){
+//  for (int i = 0; i < NUMBER_OF_ANALOG_INPUTS;i++){
+//    analogVal[i] = analogOld[i];
+//  }
+  int heldnotes[]={0};
+  int j = 0;
+//if (t1 != t2){
+//  millitime = (float)abs(t1-t2); //in milliseconds
+//  minutetime = millitime/1000.00; //in milliseconds per tap (beat)
+//  tempo = (int) 60/minutetime;
+//  float playtime = millitime/2.00;
+//   }
+   if (tempo > 0){
+t_midiMsg msg;
+
+ for(int i = 1; i < NUMBER_OF_ANALOG_INPUTS; i++){
+  analogVal[i] = analogRead(i)/8;
+    if(analogVal[i]!= analogOld[i]){
+      if(analogVal[i]>=analogOld[i]+2 || analogVal[i]<=analogOld[i]-2){
+        analogWrite(GREENPIN,random(0,255));
+  analogWrite(REDPIN,random(0,255));
+  analogWrite(BLUEPIN,random(0,255));
+        msg.status = CC;
+          msg.status = msg.status | CHANNEL - 1;
+
+        msg.data1 = controllers[i];
+        msg.data2 = analogVal[i];
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        
+              }
+    }
+    analogOld[i] = analogVal[i];
+           }
+  for (int i = 0; i < 16; i++){
+  digitalVal[i] = digitalRead(switches[i]); 
+  if(digitalVal[i] == 1){
+      heldnotes[j] = octaves3[i];
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));  
+      msg.status = NOTE_ON;
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = heldnotes[j];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,3);
+        lcd.print("Note: ");
+        
+        if (octaves3[i] == 0x30 || octaves3[i] == 0x3C){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("C");
+        }
+        if (octaves3[i] == 0x31 || octaves3[i] == 0x3D){
+          lcd.print("C#");
+         
+        }
+       if (octaves3[i] == 0x32 || octaves3[i] == 0x3E){
+        lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+        lcd.print("D");
+        }
+        if (octaves3[i] == 0x33 || octaves3[i] == 0x3F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves3[i] == 0x34){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("E");
+        }
+        if (octaves3[i] == 0x35){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("F");
+        }
+        if (octaves3[i] == 0x36){
+          lcd.print("F#");
+        }
+        if (octaves3[i] == 0x37){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("G");
+        }
+        if (octaves3[i] == 0x38){
+          lcd.print("G#");
+        }
+        if (octaves3[i] == 0x39){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("A");
+        }
+        if (octaves3[i] == 0x3A){
+          lcd.print("Bb");
+        }
+        if (octaves3[i] == 0x3B){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("B");
+        }
+        unsigned long t3 = (unsigned long) millitime; 
+        delay(t3); 
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      analogWrite(GREENPIN,random(0,255));
+      msg.status = NOTE_OFF;
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = heldnotes[j];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+//      delay(t3);
+      j = j + 1;
+       
+      }
+ }  
+  for (int i = 15; i > 0 ; i--){
+  digitalVal[i] = digitalRead(switches[i]); 
+  if(digitalVal[i] == 1){
+      heldnotes[j] = octaves3[i];           
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      analogWrite(GREENPIN,random(0,255));    
+     msg.status = NOTE_ON;
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = heldnotes[j];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+       lcd.setCursor(0,3);
+        lcd.print("Note: ");
+        
+        if (octaves3[i] == 0x30 || octaves3[i] == 0x3C){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("C");
+        }
+        if (octaves3[i] == 0x31 || octaves3[i] == 0x3D){
+          lcd.print("C#");
+         
+        }
+       if (octaves3[i] == 0x32 || octaves3[i] == 0x3E){
+        lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+        lcd.print("D");
+        }
+        if (octaves3[i] == 0x33 || octaves3[i] == 0x3F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves3[i] == 0x34){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("E");
+        }
+        if (octaves3[i] == 0x35){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("F");
+        }
+        if (octaves3[i] == 0x36){
+          lcd.print("F#");
+        }
+        if (octaves3[i] == 0x37){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("G");
+        }
+        if (octaves3[i] == 0x38){
+          lcd.print("G#");
+        }
+        if (octaves3[i] == 0x39){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("A");
+        }
+        if (octaves3[i] == 0x3A){
+          lcd.print("Bb");
+        }
+        if (octaves3[i] == 0x3B){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("B");
+        }
+        unsigned long t3 = (unsigned long) millitime; 
+        delay(t3); 
+          analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      analogWrite(GREENPIN,random(0,255));
+      msg.status = NOTE_OFF;
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = heldnotes[j];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+//      delay(t3);
+      j = j - 1;
+       //Serial.println(heldnotes[j]);
+       
+        }
+        }
+   }
+}
+
+void arpmessage(){
+  analogWrite(GREENPIN,255);
+  analogWrite(REDPIN,255);
+  analogWrite(BLUEPIN,255);
+  lcd.setCursor(0,0);
+  lcd.print("Playmode: Arpeggiate");
+ if (digitalRead(CAP2)==1 && arpvalmessage ==0){
+  lcd.setCursor(8,2);
+  lcd.print(" ");
+    lcd.setCursor(6,1);
+  lcd.print("  ");
+    lcd.setCursor(0,1);
+    lcd.print("Arp ON: Tap Pad 1");
+    
+        delay(150);
+    arpvalmessage = 1;
+    state = 1;
+   // Serial.println(state);
+  }
+  else if (digitalRead(CAP2) == 1 && arpvalmessage == 1) {
+    analogWrite(GREENPIN,255);
+  analogWrite(REDPIN,255);
+  analogWrite(BLUEPIN,255);
+    lcd.setCursor(0,1);
+    lcd.print("              ");
+    lcd.setCursor(0,1);
+    lcd.print("Arp OFF");
+    lcd.setCursor(0,2);
+    lcd.print("           ");
+    lcd.setCursor(0,3);
+    lcd.print("          ");
+    state = 0; 
+    arpvalmessage = 0;
+    delay(150);
+    //Serial.println(state);
+  }
+  if (state == 1 && tempoval == 0){
+    lcd.setCursor(0,2);
+    lcd.print("Tempo: ");
+  }
+  else if (state == 1 && tempoval == 1){
+    lcd.setCursor(9,2);
+    lcd.print("     ");
+    lcd.setCursor(7,2);
+    if (tempo > 0){
+    lcd.print(tempo);
+    }
+  }
+  
+}
+
+void playnotes(){
+ analogWrite(GREENPIN,255);
+analogWrite(REDPIN,255);
+analogWrite(BLUEPIN,255);
+  
+  tempo = 0;
+  lcd.setCursor(14,1);
+  lcd.print("    ");
+//  lcd.setCursor(0,2);
+//  lcd.print("           ");
+  lcd.setCursor(19,0);
+  lcd.print(" ");
+  lcd.setCursor(0,0);
+  lcd.write("Playmode: Freestyle");
+  
+  //lcd.clear();
+  //lcd.setCursor(1,1);
+  t_midiMsg msg;
+ for(int i = 0; i < NUMBER_OF_ANALOG_INPUTS; i++){
+  analogVal[i] = analogRead(i)/8;
+  
+   colorval[i] = {map(analogRead(i),0,1023,0,255)};
+            
+
+    if(analogVal[i]!= analogOld[i]){
+      if(analogVal[i]>=analogOld[i]+2 || analogVal[i]<=analogOld[i]-2){
+        colorval[i] = {map(analogRead(i),0,1023,0,255)};
+        
+             analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = CC;
+          msg.status = msg.status | CHANNEL - 1;
+
+        msg.data1 = controllers[i];
+        msg.data2 = analogVal[i];
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+              }
+    }
+    analogOld[i] = analogVal[i];
+   
+           }
+switch (octave){
+  case 0: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves0[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves0[i] == 0x00 || octaves0[i] == 0x0C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves0[i] == 0x01 || octaves0[i] == 0x0D){
+          lcd.print("C#");
+         
+        }
+       if (octaves0[i] == 0x02 || octaves0[i] == 0x0E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("D");
+        }
+        if (octaves0[i] == 0x03 || octaves0[i] == 0x0F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves0[i] == 0x04){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves0[i] == 0x05){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves0[i] == 0x06){
+          lcd.print("F#");
+        }
+        if (octaves0[i] == 0x07){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves0[i] == 0x08){
+          lcd.print("G#");
+        }
+        if (octaves0[i] == 0x09){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves0[i] == 0x0A){
+          lcd.print("Bb");
+        }
+        if (octaves0[i] == 0x0B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        
+       }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves0[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+        
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 1: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves1[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves1[i] == 0x10 || octaves1[i] == 0x1C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves1[i] == 0x11 || octaves1[i] == 0x1D){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+         
+        }
+       if (octaves1[i] == 0x12 || octaves1[i] == 0x1E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("F#");
+        }
+        if (octaves1[i] == 0x13 || octaves1[i] == 0x1F){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves1[i] == 0x14){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves1[i] == 0x15){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves1[i] == 0x16){
+          lcd.print("Bb");
+        }
+        if (octaves1[i] == 0x17){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        if (octaves1[i] == 0x18){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves1[i] == 0x19){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C#");
+        }
+        if (octaves1[i] == 0x1A){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("D");
+        }
+        if (octaves1[i] == 0x1B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("Eb");
+        }
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves1[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 2: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves2[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves2[i] == 0x20 || octaves2[i] == 0x2C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves2[i] == 0x21 || octaves2[i] == 0x2D){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+         
+        }
+       if (octaves2[i] == 0x22 || octaves2[i] == 0x2E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("Bb");
+        }
+        if (octaves2[i] == 0x23 || octaves2[i] == 0x2F){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        if (octaves2[i] == 0x24){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves2[i] == 0x25){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C#");
+        }
+        if (octaves2[i] == 0x26){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("D");
+        }
+        if (octaves2[i] == 0x27){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("Eb");
+        }
+        if (octaves2[i] == 0x28){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves2[i] == 0x29){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves2[i] == 0x2A){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F#");
+        }
+        if (octaves2[i] == 0x2B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves2[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 3: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+      //  digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves3[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves3[i] == 0x30 || octaves3[i] == 0x3C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves3[i] == 0x31 || octaves3[i] == 0x3D){
+          lcd.print("C#");
+         
+        }
+       if (octaves3[i] == 0x32 || octaves3[i] == 0x3E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("D");
+        }
+        if (octaves3[i] == 0x33 || octaves3[i] == 0x3F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves3[i] == 0x34){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves3[i] == 0x35){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves3[i] == 0x36){
+          lcd.print("F#");
+        }
+        if (octaves3[i] == 0x37){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves3[i] == 0x38){
+          lcd.print("G#");
+        }
+        if (octaves3[i] == 0x39){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves3[i] == 0x3A){
+          lcd.print("Bb");
+        }
+        if (octaves3[i] == 0x3B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+                            }
+     else{
+     // digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves3[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 4: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves4[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves4[i] == 0x40 || octaves4[i] == 0x4C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves4[i] == 0x41 || octaves4[i] == 0x4D){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+         
+        }
+       if (octaves4[i] == 0x42 || octaves4[i] == 0x4E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("F#");
+        }
+        if (octaves4[i] == 0x43 || octaves4[i] == 0x4F){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves4[i] == 0x44){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves4[i] == 0x45){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves4[i] == 0x46){
+          lcd.print("Bb");
+        }
+        if (octaves4[i] == 0x47){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        if (octaves4[i] == 0x48){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves4[i] == 0x49){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C#");
+        }
+        if (octaves4[i] == 0x4A){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,2);
+          lcd.print("D");
+        }
+        if (octaves4[i] == 0x4B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("Eb");
+        }
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves4[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 5: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves5[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves5[i] == 0x50 || octaves5[i] == 0x5C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves5[i] == 0x51 || octaves5[i] == 0x5D){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+         
+        }
+       if (octaves5[i] == 0x52 || octaves5[i] == 0x5E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("Bb");
+        }
+        if (octaves5[i] == 0x53 || octaves5[i] == 0x5F){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        if (octaves5[i] == 0x54){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves5[i] == 0x55){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C#");
+        }
+        if (octaves5[i] == 0x56){
+          lcd.setCursor(7,2);
+          lcd.print(" ");
+          lcd.setCursor(6,2);
+          lcd.print("D");
+        }
+        if (octaves5[i] == 0x57){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("Eb");
+        }
+        if (octaves5[i] == 0x58){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves5[i] == 0x59){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves5[i] == 0x5A){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F#");
+        }
+        if (octaves5[i] == 0x5B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves5[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 6: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves6[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves6[i] == 0x60 || octaves6[i] == 0x6C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves6[i] == 0x61 || octaves6[i] == 0x6D){
+          lcd.print("C#");
+         
+        }
+       if (octaves6[i] == 0x62 || octaves6[i] == 0x6E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("D");
+        }
+        if (octaves6[i] == 0x63 || octaves6[i] == 0x6F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves6[i] == 0x64){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves6[i] == 0x65){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves6[i] == 0x66){
+          lcd.print("F#");
+        }
+        if (octaves6[i] == 0x67){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves6[i] == 0x68){
+          lcd.print("G#");
+        }
+        if (octaves6[i] == 0x69){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves6[i] == 0x6A){
+          lcd.print("Bb");
+        }
+        if (octaves6[i] == 0x6B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves6[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));  
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 7: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves7[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves7[i] == 0x70){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves7[i] == 0x71){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+         
+        }
+       if (octaves7[i] == 0x72){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("F#");
+        }
+        if (octaves7[i] == 0x73){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves7[i] == 0x74){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves7[i] == 0x75){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves7[i] == 0x76){
+          lcd.print("Bb");
+        }
+        if (octaves7[i] == 0x77){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+                         }
+      }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves7[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+}
+}
+
+void octavechange(){
+ if (state == 0){ 
+  //lcd.setCursor(0,1);
+  if (digitalRead(CAP3) == 1){
+    analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+//    digitalWrite(ledPins[2],HIGH);
+//    digitalWrite(ledPins[4],HIGH);
+//    delay(150);
+//    digitalWrite(ledPins[2],LOW);
+//    digitalWrite(ledPins[4],LOW);
+//    digitalWrite(ledPins[2],HIGH);
+//    digitalWrite(ledPins[4],HIGH);
+//    delay(150);
+//    digitalWrite(ledPins[2],LOW);
+//    digitalWrite(ledPins[4],LOW);
+    octave = octave + 1; 
+    lcd.setCursor(0,2);
+    lcd.print("Octave: ");
+    lcd.print(octave);
+    delay(500);
+    }
+  else if (digitalRead(CAP4) == 1){
+    analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+//    digitalWrite(ledPins[2],HIGH);
+//    digitalWrite(ledPins[4],HIGH);
+//    delay(150);
+//    digitalWrite(ledPins[2],LOW);
+//    digitalWrite(ledPins[4],LOW);
+//    digitalWrite(ledPins[2],HIGH);
+//    digitalWrite(ledPins[4],HIGH);
+//    delay(150);
+//    digitalWrite(ledPins[2],LOW);
+//    digitalWrite(ledPins[4],LOW);
+    octave = octave - 1;
+    lcd.setCursor(0,2);
+    lcd.print("Octave: ");
+    lcd.print(octave);
+    delay(500);
+     }
+ }
+  }
+
+void loop() {
+
+if(digitalRead(CAP2) == 0 && state == 0){
+  playnotes();
+  octavechange();
+}
+else{
+  arp();
+  arpmessage();
+
+}
+
+}
+
+//This code actuates a MIDI controller, which sends musical messages over USB to a virtual MIDI port
+//to be read by a Digital Audio Workspace. This code has several functions:
+
+//tempotap:
+  //Tapping CAP1 takes difference in time between successive taps
+
+//arp: 
+  //takes value from tempo tap and loops up and down between played notes with that value delay in between
+
+//arpmessage:
+//  turns on and off the arp, prints to screen
+
+//playnotes:
+//  play any note from 0th to 87th note
+
+//Octavechange:
+//   switches between octaves (attached to CAP3/4)
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(2,3,4,5,6,7);
+
+#define NOTE_OFF  0x80
+#define NOTE_ON   0x90
+#define CC        0xB0
+#define NUMBER_OF_ANALOG_INPUTS 8
+#define NUMBER_OF_DIGITAL_INPUTS 16
+#define CHANNEL 1
+#define CAP1    18
+#define CAP2    19
+#define CAP3    20
+#define CAP4    22
+
+#define REDPIN 8
+#define GREENPIN 9
+#define BLUEPIN 10
+#define px A7
+#define py A6
+#define ps A8
+int fade = 3;
+int color = 3;
+boolean on = false;
+int buttonstate = 0;
+int lastbuttonstate = 0;
+int colorvalold[NUMBER_OF_ANALOG_INPUTS];
+int colorval[NUMBER_OF_ANALOG_INPUTS];
+
+int controllers[NUMBER_OF_ANALOG_INPUTS] = {
+0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17
+};
+int notes[4] = {
+0x43,0x45,0x47,0x42
+};
+int switches[NUMBER_OF_DIGITAL_INPUTS] = {
+  53,52,51,50,49,48,47,46,45,44,43,42,41,40,39,38
+};
+int ledPins[NUMBER_OF_DIGITAL_INPUTS] = {
+  25,24,23,22
+};
+
+int octave = 3;
+int octaves0[16] = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F};
+int octaves1[16] = {0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F};
+int octaves2[16] = {0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F};
+int octaves3[16] = {0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F};
+int octaves4[16] = {0x40,0x41,0x42,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4A,0x4B,0x4C,0x4D,0x4E,0x4F};
+int octaves5[16] = {0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5A,0x5B,0x5C,0x5D,0x5E,0x5F};
+int octaves6[16] = {0x60,0x61,0x62,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6A,0x6B,0x6C,0x46,0x6E,0x6F};
+int octaves7[8] =  {0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77};
+int notechar[16] = {"C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B","C","C#","D","Eb"};
+int analogVal[NUMBER_OF_ANALOG_INPUTS];
+int analogOld[NUMBER_OF_ANALOG_INPUTS];
+int digitalVal[NUMBER_OF_DIGITAL_INPUTS];
+int digitalOld[NUMBER_OF_DIGITAL_INPUTS];
+
+int state = 0;
+int tempoval = 0;
+int arpvalmessage = 0;
+int arpval = 0;
+float millitime;
+float minutetime;
+float playtime;
+float t1;
+float t2;
+int tempo = 0;
+
+typedef struct{
+  uint8_t status;
+  uint8_t data1;
+  uint8_t data2;
+  }
+  
+t_midiMsg;
+
+void setup() 
+{
+  for(int i = 0; i < NUMBER_OF_ANALOG_INPUTS; i++){
+    analogOld[i] = -1;
+  }
+  for (int i = 0; i< NUMBER_OF_ANALOG_INPUTS;i++){
+    colorvalold[i] = -1;
+  }
+ for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalOld[i] = -1;
+ }
+  for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+    pinMode(switches[i],INPUT_PULLUP);
+    //pinMode(7,INPUT_PULLUP);
+  }
+
+pinMode(REDPIN, OUTPUT);
+  pinMode(GREENPIN, OUTPUT);
+  pinMode(BLUEPIN, OUTPUT);
+   analogWrite(GREENPIN,255);
+analogWrite(REDPIN,255);
+analogWrite(BLUEPIN,255);
+  
+ lcd.begin(20,4);
+ attachInterrupt(digitalPinToInterrupt(18),tempotap,RISING);
+ pinMode(8,INPUT);
+ Serial.begin(9600);
+ delay(500);
+ digitalWrite(13,HIGH);
+ delay(500);
+ digitalWrite(13,LOW);
+
+}
+
+//FUNCTIONS: tempotap(),arp(),arpmessage(),playnotes0-7(), octavechange(),
+
+void tempotap()
+{
+//  lcd.setCursor(0,2);
+//  lcd.print("         ");
+ if (state == 1 && tempoval == 0){
+  analogWrite(GREENPIN,255);
+  analogWrite(REDPIN,255);
+  analogWrite(BLUEPIN,255);
+//  lcd.print("Tempo: ");
+ t1 = (float) millis();
+  tempoval = 1;
+ }
+ else if (state == 1 && tempoval == 1) {
+  analogWrite(GREENPIN,random(0,255));
+  analogWrite(REDPIN,random(0,255));
+  analogWrite(BLUEPIN,random(255));
+ // Serial.println("TAP2");
+ t2 = (float) millis();
+  tempoval = 0;
+//  lcd.setCursor(7,2);
+//   lcd.print(tempo);
+//   Serial.println(tempo);
+ }
+ if (t1 != t2){
+  millitime = (float)abs(t1-t2); //in milliseconds
+  minutetime = millitime/1000.00; //in milliseconds per tap (beat)
+  tempo = (int) 60/minutetime;
+  float playtime = millitime/2.0;
+   }
+// Serial.println(state);
+ delay(20);
+}
+
+
+void arp(){
+//  for (int i = 0; i < NUMBER_OF_ANALOG_INPUTS;i++){
+//    analogVal[i] = analogOld[i];
+//  }
+  int heldnotes[]={0};
+  int j = 0;
+//if (t1 != t2){
+//  millitime = (float)abs(t1-t2); //in milliseconds
+//  minutetime = millitime/1000.00; //in milliseconds per tap (beat)
+//  tempo = (int) 60/minutetime;
+//  float playtime = millitime/2.00;
+//   }
+   if (tempo > 0){
+t_midiMsg msg;
+
+ for(int i = 1; i < NUMBER_OF_ANALOG_INPUTS; i++){
+  analogVal[i] = analogRead(i)/8;
+    if(analogVal[i]!= analogOld[i]){
+      if(analogVal[i]>=analogOld[i]+2 || analogVal[i]<=analogOld[i]-2){
+        analogWrite(GREENPIN,random(0,255));
+  analogWrite(REDPIN,random(0,255));
+  analogWrite(BLUEPIN,random(0,255));
+        msg.status = CC;
+          msg.status = msg.status | CHANNEL - 1;
+
+        msg.data1 = controllers[i];
+        msg.data2 = analogVal[i];
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        
+              }
+    }
+    analogOld[i] = analogVal[i];
+           }
+  for (int i = 0; i < 16; i++){
+  digitalVal[i] = digitalRead(switches[i]); 
+  if(digitalVal[i] == 1){
+      heldnotes[j] = octaves3[i];
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));  
+      msg.status = NOTE_ON;
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = heldnotes[j];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,3);
+        lcd.print("Note: ");
+        
+        if (octaves3[i] == 0x30 || octaves3[i] == 0x3C){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("C");
+        }
+        if (octaves3[i] == 0x31 || octaves3[i] == 0x3D){
+          lcd.print("C#");
+         
+        }
+       if (octaves3[i] == 0x32 || octaves3[i] == 0x3E){
+        lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+        lcd.print("D");
+        }
+        if (octaves3[i] == 0x33 || octaves3[i] == 0x3F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves3[i] == 0x34){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("E");
+        }
+        if (octaves3[i] == 0x35){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("F");
+        }
+        if (octaves3[i] == 0x36){
+          lcd.print("F#");
+        }
+        if (octaves3[i] == 0x37){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("G");
+        }
+        if (octaves3[i] == 0x38){
+          lcd.print("G#");
+        }
+        if (octaves3[i] == 0x39){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("A");
+        }
+        if (octaves3[i] == 0x3A){
+          lcd.print("Bb");
+        }
+        if (octaves3[i] == 0x3B){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("B");
+        }
+        unsigned long t3 = (unsigned long) millitime; 
+        delay(t3); 
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      analogWrite(GREENPIN,random(0,255));
+      msg.status = NOTE_OFF;
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = heldnotes[j];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+//      delay(t3);
+      j = j + 1;
+       
+      }
+ }  
+  for (int i = 15; i > 0 ; i--){
+  digitalVal[i] = digitalRead(switches[i]); 
+  if(digitalVal[i] == 1){
+      heldnotes[j] = octaves3[i];           
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      analogWrite(GREENPIN,random(0,255));    
+     msg.status = NOTE_ON;
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = heldnotes[j];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+       lcd.setCursor(0,3);
+        lcd.print("Note: ");
+        
+        if (octaves3[i] == 0x30 || octaves3[i] == 0x3C){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("C");
+        }
+        if (octaves3[i] == 0x31 || octaves3[i] == 0x3D){
+          lcd.print("C#");
+         
+        }
+       if (octaves3[i] == 0x32 || octaves3[i] == 0x3E){
+        lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+        lcd.print("D");
+        }
+        if (octaves3[i] == 0x33 || octaves3[i] == 0x3F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves3[i] == 0x34){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("E");
+        }
+        if (octaves3[i] == 0x35){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("F");
+        }
+        if (octaves3[i] == 0x36){
+          lcd.print("F#");
+        }
+        if (octaves3[i] == 0x37){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("G");
+        }
+        if (octaves3[i] == 0x38){
+          lcd.print("G#");
+        }
+        if (octaves3[i] == 0x39){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("A");
+        }
+        if (octaves3[i] == 0x3A){
+          lcd.print("Bb");
+        }
+        if (octaves3[i] == 0x3B){
+          lcd.setCursor(7,3);
+          lcd.print(" ");
+          lcd.setCursor(6,3);
+          lcd.print("B");
+        }
+        unsigned long t3 = (unsigned long) millitime; 
+        delay(t3); 
+          analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      analogWrite(GREENPIN,random(0,255));
+      msg.status = NOTE_OFF;
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = heldnotes[j];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+//      delay(t3);
+      j = j - 1;
+       //Serial.println(heldnotes[j]);
+       
+        }
+        }
+   }
+}
+
+void arpmessage(){
+  analogWrite(GREENPIN,255);
+  analogWrite(REDPIN,255);
+  analogWrite(BLUEPIN,255);
+  lcd.setCursor(0,0);
+  lcd.print("Playmode: Arpeggiate");
+ if (digitalRead(CAP2)==1 && arpvalmessage ==0){
+  lcd.setCursor(8,2);
+  lcd.print(" ");
+    lcd.setCursor(6,1);
+  lcd.print("  ");
+    lcd.setCursor(0,1);
+    lcd.print("Arp ON: Tap Pad 1");
+    
+        delay(150);
+    arpvalmessage = 1;
+    state = 1;
+   // Serial.println(state);
+  }
+  else if (digitalRead(CAP2) == 1 && arpvalmessage == 1) {
+    analogWrite(GREENPIN,255);
+  analogWrite(REDPIN,255);
+  analogWrite(BLUEPIN,255);
+    lcd.setCursor(0,1);
+    lcd.print("              ");
+    lcd.setCursor(0,1);
+    lcd.print("Arp OFF");
+    lcd.setCursor(0,2);
+    lcd.print("           ");
+    lcd.setCursor(0,3);
+    lcd.print("          ");
+    state = 0; 
+    arpvalmessage = 0;
+    delay(150);
+    //Serial.println(state);
+  }
+  if (state == 1 && tempoval == 0){
+    lcd.setCursor(0,2);
+    lcd.print("Tempo: ");
+  }
+  else if (state == 1 && tempoval == 1){
+    lcd.setCursor(9,2);
+    lcd.print("     ");
+    lcd.setCursor(7,2);
+    if (tempo > 0){
+    lcd.print(tempo);
+    }
+  }
+  
+}
+
+void playnotes(){
+ analogWrite(GREENPIN,255);
+analogWrite(REDPIN,255);
+analogWrite(BLUEPIN,255);
+  
+  tempo = 0;
+  lcd.setCursor(14,1);
+  lcd.print("    ");
+//  lcd.setCursor(0,2);
+//  lcd.print("           ");
+  lcd.setCursor(19,0);
+  lcd.print(" ");
+  lcd.setCursor(0,0);
+  lcd.write("Playmode: Freestyle");
+  
+  //lcd.clear();
+  //lcd.setCursor(1,1);
+  t_midiMsg msg;
+ for(int i = 0; i < NUMBER_OF_ANALOG_INPUTS; i++){
+  analogVal[i] = analogRead(i)/8;
+  
+   colorval[i] = {map(analogRead(i),0,1023,0,255)};
+            
+
+    if(analogVal[i]!= analogOld[i]){
+      if(analogVal[i]>=analogOld[i]+2 || analogVal[i]<=analogOld[i]-2){
+        colorval[i] = {map(analogRead(i),0,1023,0,255)};
+        
+             analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = CC;
+          msg.status = msg.status | CHANNEL - 1;
+
+        msg.data1 = controllers[i];
+        msg.data2 = analogVal[i];
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+              }
+    }
+    analogOld[i] = analogVal[i];
+   
+           }
+switch (octave){
+  case 0: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves0[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves0[i] == 0x00 || octaves0[i] == 0x0C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves0[i] == 0x01 || octaves0[i] == 0x0D){
+          lcd.print("C#");
+         
+        }
+       if (octaves0[i] == 0x02 || octaves0[i] == 0x0E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("D");
+        }
+        if (octaves0[i] == 0x03 || octaves0[i] == 0x0F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves0[i] == 0x04){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves0[i] == 0x05){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves0[i] == 0x06){
+          lcd.print("F#");
+        }
+        if (octaves0[i] == 0x07){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves0[i] == 0x08){
+          lcd.print("G#");
+        }
+        if (octaves0[i] == 0x09){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves0[i] == 0x0A){
+          lcd.print("Bb");
+        }
+        if (octaves0[i] == 0x0B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        
+       }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves0[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+        
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 1: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves1[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves1[i] == 0x10 || octaves1[i] == 0x1C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves1[i] == 0x11 || octaves1[i] == 0x1D){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+         
+        }
+       if (octaves1[i] == 0x12 || octaves1[i] == 0x1E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("F#");
+        }
+        if (octaves1[i] == 0x13 || octaves1[i] == 0x1F){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves1[i] == 0x14){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves1[i] == 0x15){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves1[i] == 0x16){
+          lcd.print("Bb");
+        }
+        if (octaves1[i] == 0x17){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        if (octaves1[i] == 0x18){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves1[i] == 0x19){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C#");
+        }
+        if (octaves1[i] == 0x1A){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("D");
+        }
+        if (octaves1[i] == 0x1B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("Eb");
+        }
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves1[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 2: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves2[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves2[i] == 0x20 || octaves2[i] == 0x2C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves2[i] == 0x21 || octaves2[i] == 0x2D){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+         
+        }
+       if (octaves2[i] == 0x22 || octaves2[i] == 0x2E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("Bb");
+        }
+        if (octaves2[i] == 0x23 || octaves2[i] == 0x2F){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        if (octaves2[i] == 0x24){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves2[i] == 0x25){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C#");
+        }
+        if (octaves2[i] == 0x26){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("D");
+        }
+        if (octaves2[i] == 0x27){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("Eb");
+        }
+        if (octaves2[i] == 0x28){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves2[i] == 0x29){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves2[i] == 0x2A){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F#");
+        }
+        if (octaves2[i] == 0x2B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves2[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 3: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+      //  digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves3[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves3[i] == 0x30 || octaves3[i] == 0x3C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves3[i] == 0x31 || octaves3[i] == 0x3D){
+          lcd.print("C#");
+         
+        }
+       if (octaves3[i] == 0x32 || octaves3[i] == 0x3E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("D");
+        }
+        if (octaves3[i] == 0x33 || octaves3[i] == 0x3F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves3[i] == 0x34){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves3[i] == 0x35){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves3[i] == 0x36){
+          lcd.print("F#");
+        }
+        if (octaves3[i] == 0x37){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves3[i] == 0x38){
+          lcd.print("G#");
+        }
+        if (octaves3[i] == 0x39){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves3[i] == 0x3A){
+          lcd.print("Bb");
+        }
+        if (octaves3[i] == 0x3B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+                            }
+     else{
+     // digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves3[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 4: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves4[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves4[i] == 0x40 || octaves4[i] == 0x4C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves4[i] == 0x41 || octaves4[i] == 0x4D){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+         
+        }
+       if (octaves4[i] == 0x42 || octaves4[i] == 0x4E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("F#");
+        }
+        if (octaves4[i] == 0x43 || octaves4[i] == 0x4F){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves4[i] == 0x44){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves4[i] == 0x45){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves4[i] == 0x46){
+          lcd.print("Bb");
+        }
+        if (octaves4[i] == 0x47){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        if (octaves4[i] == 0x48){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves4[i] == 0x49){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C#");
+        }
+        if (octaves4[i] == 0x4A){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,2);
+          lcd.print("D");
+        }
+        if (octaves4[i] == 0x4B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("Eb");
+        }
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves4[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 5: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves5[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves5[i] == 0x50 || octaves5[i] == 0x5C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves5[i] == 0x51 || octaves5[i] == 0x5D){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+         
+        }
+       if (octaves5[i] == 0x52 || octaves5[i] == 0x5E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("Bb");
+        }
+        if (octaves5[i] == 0x53 || octaves5[i] == 0x5F){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+        if (octaves5[i] == 0x54){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves5[i] == 0x55){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C#");
+        }
+        if (octaves5[i] == 0x56){
+          lcd.setCursor(7,2);
+          lcd.print(" ");
+          lcd.setCursor(6,2);
+          lcd.print("D");
+        }
+        if (octaves5[i] == 0x57){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("Eb");
+        }
+        if (octaves5[i] == 0x58){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves5[i] == 0x59){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves5[i] == 0x5A){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F#");
+        }
+        if (octaves5[i] == 0x5B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves5[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 6: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves6[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves6[i] == 0x60 || octaves6[i] == 0x6C){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("C");
+        }
+        if (octaves6[i] == 0x61 || octaves6[i] == 0x6D){
+          lcd.print("C#");
+         
+        }
+       if (octaves6[i] == 0x62 || octaves6[i] == 0x6E){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("D");
+        }
+        if (octaves6[i] == 0x63 || octaves6[i] == 0x6F){
+          
+          lcd.print("Eb");
+        }
+        if (octaves6[i] == 0x64){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves6[i] == 0x65){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+        }
+        if (octaves6[i] == 0x66){
+          lcd.print("F#");
+        }
+        if (octaves6[i] == 0x67){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves6[i] == 0x68){
+          lcd.print("G#");
+        }
+        if (octaves6[i] == 0x69){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves6[i] == 0x6A){
+          lcd.print("Bb");
+        }
+        if (octaves6[i] == 0x6B){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+        }
+                            }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves6[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));  
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+    case 7: 
+for(int i = 0; i < NUMBER_OF_DIGITAL_INPUTS; i++){
+  digitalVal[i] = digitalRead(switches[i]);
+    if(digitalVal[i] != digitalOld[i]){
+      if(digitalVal[i] == 1){
+        digitalWrite(ledPins[i],HIGH);
+        msg.status = NOTE_ON;
+        analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+        msg.status = msg.status | CHANNEL - 1;
+        msg.data1 = octaves7[i];
+        msg.data2 = 127;
+        Serial.write((uint8_t *)&msg,sizeof(msg));
+        lcd.setCursor(0,1);
+        lcd.print("Note: ");
+        if (octaves7[i] == 0x70){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("E");
+        }
+        if (octaves7[i] == 0x71){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("F");
+         
+        }
+       if (octaves7[i] == 0x72){
+        lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+        lcd.print("F#");
+        }
+        if (octaves7[i] == 0x73){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G");
+        }
+        if (octaves7[i] == 0x74){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("G#");
+        }
+        if (octaves7[i] == 0x75){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("A");
+        }
+        if (octaves7[i] == 0x76){
+          lcd.print("Bb");
+        }
+        if (octaves7[i] == 0x77){
+          lcd.setCursor(7,1);
+          lcd.print(" ");
+          lcd.setCursor(6,1);
+          lcd.print("B");
+                         }
+      }
+     else{
+      digitalWrite(ledPins[i],LOW);
+      msg.status = NOTE_OFF;
+      analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+      msg.status = msg.status | CHANNEL - 1;
+      msg.data1 = octaves7[i];
+      msg.data2 = 127;
+      Serial.write((uint8_t *)&msg,sizeof(msg));
+         }                               }
+      digitalOld[i] = digitalVal[i];
+      delay(10);
+      
+    }
+    break;
+}
+}
+
+void octavechange(){
+ if (state == 0){ 
+  //lcd.setCursor(0,1);
+  if (digitalRead(CAP3) == 1){
+    analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+//    digitalWrite(ledPins[2],HIGH);
+//    digitalWrite(ledPins[4],HIGH);
+//    delay(150);
+//    digitalWrite(ledPins[2],LOW);
+//    digitalWrite(ledPins[4],LOW);
+//    digitalWrite(ledPins[2],HIGH);
+//    digitalWrite(ledPins[4],HIGH);
+//    delay(150);
+//    digitalWrite(ledPins[2],LOW);
+//    digitalWrite(ledPins[4],LOW);
+    octave = octave + 1; 
+    lcd.setCursor(0,2);
+    lcd.print("Octave: ");
+    lcd.print(octave);
+    delay(500);
+    }
+  else if (digitalRead(CAP4) == 1){
+    analogWrite(GREENPIN,random(0,255));
+      analogWrite(REDPIN,random(0,255));
+      analogWrite(BLUEPIN,random(0,255));
+//    digitalWrite(ledPins[2],HIGH);
+//    digitalWrite(ledPins[4],HIGH);
+//    delay(150);
+//    digitalWrite(ledPins[2],LOW);
+//    digitalWrite(ledPins[4],LOW);
+//    digitalWrite(ledPins[2],HIGH);
+//    digitalWrite(ledPins[4],HIGH);
+//    delay(150);
+//    digitalWrite(ledPins[2],LOW);
+//    digitalWrite(ledPins[4],LOW);
+    octave = octave - 1;
+    lcd.setCursor(0,2);
+    lcd.print("Octave: ");
+    lcd.print(octave);
+    delay(500);
+     }
+ }
+  }
+
+void loop() {
+
+if(digitalRead(CAP2) == 0 && state == 0){
+  playnotes();
+  octavechange();
+}
+else{
+  arp();
+  arpmessage();
+
+}
+
+}
+
+
+View Omri's Profile
+@SnipSave on Twitter
+© 2021 Luke Peters. All rights reserved.
